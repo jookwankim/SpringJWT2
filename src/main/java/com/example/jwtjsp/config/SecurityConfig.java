@@ -1,5 +1,8 @@
 package com.example.jwtjsp.config;
 
+// 필요한 import 문들
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -20,25 +23,33 @@ import org.springframework.security.web.authentication.AuthenticationSuccessHand
 import org.springframework.security.web.authentication.SimpleUrlAuthenticationFailureHandler;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
+import com.example.jwtjsp.security.CustomAuthenticationEntryPoint; // EntryPoint import
 import com.example.jwtjsp.security.JwtAuthenticationFilter;
-import com.example.jwtjsp.security.LoggingAuthenticationSuccessHandler;
+import com.example.jwtjsp.security.LoggingAuthenticationSuccessHandler; // 로깅 핸들러 import
 import com.example.jwtjsp.security.LoginAuthenticationFilter;
 import com.example.jwtjsp.util.JwtUtil;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 @Configuration
 @EnableWebSecurity
 @RequiredArgsConstructor
 public class SecurityConfig {
 
+    // 필수 컴포넌트 주입
     private final JwtUtil jwtUtil;
     private final AuthenticationConfiguration authenticationConfiguration;
-    
- // AuthenticationEntryPoint 주입 (위 클래스에 @Component를 사용했거나 아래 @Bean으로 정의)
+    // CustomAuthenticationEntryPoint가 @Component로 등록되어 있다고 가정하고 주입
     private final AuthenticationEntryPoint customAuthenticationEntryPoint;
 
-    // 간단한 인메모리 사용자 설정 (실제로는 DB 연동)
+    // ApplicationContext 주입 (핸들러 직접 조회를 위해)
+    @Autowired
+    private ApplicationContext context;
+
+    // --- 기본 빈 설정 ---
+
     @Bean
     public UserDetailsService userDetailsService() {
         UserDetails user = User.builder()
@@ -63,85 +74,92 @@ public class SecurityConfig {
     public AuthenticationManager authenticationManager(AuthenticationConfiguration configuration) throws Exception {
         return configuration.getAuthenticationManager();
     }
-    
- // Define Success Handler Bean
+
+    // --- 핸들러 빈 설정 ---
+
     @Bean
     public AuthenticationSuccessHandler customAuthenticationSuccessHandler() {
-        // LoggingAuthenticationSuccessHandler를 사용하고 기본 리다이렉트 URL을 "/main"으로 설정
+        // LoggingAuthenticationSuccessHandler 사용, 기본 리다이렉트 URL은 "/main"
         return new LoggingAuthenticationSuccessHandler("/main");
     }
 
-    // Define Failure Handler Bean
     @Bean
     public AuthenticationFailureHandler customAuthenticationFailureHandler() {
          SimpleUrlAuthenticationFailureHandler failureHandler = new SimpleUrlAuthenticationFailureHandler();
-         failureHandler.setDefaultFailureUrl("/login?error"); // Redirect target on failure
+         // 실패 시 /login?error 로 리다이렉트
+         failureHandler.setDefaultFailureUrl("/login?error");
          return failureHandler;
     }
 
-    // 로그인 처리를 위한 커스텀 필터 빈 등록
-     @Bean
+    // --- 커스텀 필터 빈 설정 ---
+
+    // !!! 진단용 수정: 핸들러를 ApplicationContext에서 직접 조회하여 설정 !!!
+    @Bean
     public LoginAuthenticationFilter loginAuthenticationFilter() throws Exception {
         LoginAuthenticationFilter filter = new LoginAuthenticationFilter(jwtUtil);
         filter.setAuthenticationManager(authenticationManager(authenticationConfiguration));
-        filter.setFilterProcessesUrl("/loginProc"); // 로그인 처리 URL 설정
-        
-     // Set the handlers
-        filter.setAuthenticationSuccessHandler(customAuthenticationSuccessHandler());
-        filter.setAuthenticationFailureHandler(customAuthenticationFailureHandler());
+        filter.setFilterProcessesUrl("/loginProc");
+
+        // Context에서 직접 핸들러 빈 가져오기 (빈 이름이 customAuthenticationSuccessHandler, customAuthenticationFailureHandler 라고 가정)
+        AuthenticationSuccessHandler successHandler = context.getBean("customAuthenticationSuccessHandler", AuthenticationSuccessHandler.class);
+        AuthenticationFailureHandler failureHandler = context.getBean("customAuthenticationFailureHandler", AuthenticationFailureHandler.class);
+
+        log.info(">>> [DEBUG] Explicitly fetching and setting handlers on LoginAuthenticationFilter bean."); // 확인용 로그 추가
+        filter.setAuthenticationSuccessHandler(successHandler);
+        filter.setAuthenticationFailureHandler(failureHandler);
 
         return filter;
     }
 
-    // JWT 인증 필터 빈 등록
     @Bean
     public JwtAuthenticationFilter jwtAuthenticationFilter() {
         return new JwtAuthenticationFilter(jwtUtil);
     }
 
 
+    // --- 메인 SecurityFilterChain 설정 ---
+    // !!! 진단용 수정: loginFilter 파라미터 제거하고 빈 메소드 직접 호출 !!!
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
-                .csrf(csrf -> csrf.disable()) // CSRF 비활성화 (Stateless 이므로)
-                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)) // 세션 사용 안함
-                .authorizeHttpRequests(authz -> authz
-                        .antMatchers("/login", "/loginProc", "/css/**", "/js/**", "/favicon.ico").permitAll() // 로그인 및 정적 리소스 허용
-                        .antMatchers("/api/token/refresh").permitAll() // 토큰 갱신 엔드포인트는 접근 허용 (필터에서 처리) - 주의: Refresh Token 자체로 인증
-                        .antMatchers("/hello").hasRole("USER") // /hello는 USER 롤 필요
-                        .antMatchers("/admin").hasRole("ADMIN") // /admin은 ADMIN 롤 필요 (예시)
-                        .anyRequest().authenticated() // 나머지 요청은 인증 필요
-                )
-                // 기본 FormLogin, HttpBasic 비활성화
-                .formLogin(form -> form.disable())
-                .httpBasic(basic -> basic.disable())
-                // 로그아웃 처리
-                .logout(logout -> logout
-                        .logoutUrl("/logout") // 로그아웃 처리 URL
-                        .addLogoutHandler((request, response, authentication) -> {
-                            // 로그아웃 시 쿠키 삭제 핸들러
-                             response.addCookie(jwtUtil.createLogoutCookie(jwtUtil.getAccessTokenCookieName(), "/"));
-                             response.addCookie(jwtUtil.createLogoutCookie(jwtUtil.getRefreshTokenCookieName(), "/api/token/refresh"));
-                        })
-                        .logoutSuccessUrl("/login?logout") // 로그아웃 성공 시 리다이렉트 URL
-                        .permitAll()
-                )
-                // ★★★ 예외 처리 설정 추가 ★★★
-                .exceptionHandling(exceptions -> exceptions
-                    // 인증되지 않은 사용자가 접근 시 사용할 EntryPoint 지정
-                    .authenticationEntryPoint(customAuthenticationEntryPoint)
-                    // 참고: 인가는 되었으나 권한이 부족한 경우(403 Forbidden) 처리 핸들러는 .accessDeniedHandler(...) 로 설정 가능
-                    // .accessDeniedHandler(yourAccessDeniedHandler)
-                );
-        
+            // CSRF 비활성화 (Stateless)
+            .csrf(csrf -> csrf.disable())
+            // 세션 관리: STATELESS 설정
+            .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            // 요청별 접근 권한 설정
+            .authorizeHttpRequests(authz -> authz
+                .antMatchers("/login", "/loginProc", "/css/**", "/js/**", "/favicon.ico").permitAll() // 공개 경로
+                .antMatchers("/api/token/refresh").permitAll() // 토큰 갱신 경로
+                .antMatchers("/hello").hasRole("USER") // USER 권한 필요 경로
+                .antMatchers("/admin").hasRole("ADMIN") // ADMIN 권한 필요 경로 (예시)
+                .anyRequest().authenticated() // 나머지 모든 요청은 인증 필요
+            )
+            // 기본 FormLogin, HttpBasic 비활성화
+            .formLogin(form -> form.disable())
+            .httpBasic(basic -> basic.disable())
+            // 로그아웃 설정
+            .logout(logout -> logout
+                .logoutUrl("/logout")
+                .addLogoutHandler((request, response, authentication) -> { // 쿠키 삭제 핸들러
+                    // logout 핸들러 내부의 get~CookieName() 메소드 호출은 JwtUtil 클래스 확인 필요
+                    response.addCookie(jwtUtil.createLogoutCookie(jwtUtil.getAccessTokenCookieName(), "/"));
+                    response.addCookie(jwtUtil.createLogoutCookie(jwtUtil.getRefreshTokenCookieName(), "/api/token/refresh"));
+                })
+                .logoutSuccessUrl("/login?logout") // 로그아웃 성공 시 이동할 URL
+                .permitAll()
+            )
+            // 예외 처리 설정: 인증되지 않은 사용자 접근 시 처리
+            .exceptionHandling(exceptions -> exceptions
+                .authenticationEntryPoint(customAuthenticationEntryPoint) // 주입받은 Custom EntryPoint 사용
+            );
 
+        // !!! 중요: 필터 추가 방식 변경 !!!
+        // 기존: http.addFilterAt(loginFilter, UsernamePasswordAuthenticationFilter.class);
+        // 변경: loginAuthenticationFilter() 빈 메소드를 직접 호출하여 필터 인스턴스를 가져와 설정
+        http.addFilterAt(loginAuthenticationFilter(), UsernamePasswordAuthenticationFilter.class);
 
-        // 커스텀 필터 추가: (order is important)
-        // 1. LoginAuthenticationFilter: UsernamePasswordAuthenticationFilter 자리에 추가하여 로그인 처리 및 토큰 발급
-        // 2. JwtAuthenticationFilter: UsernamePasswordAuthenticationFilter 앞에 추가하여 요청 시 토큰 검증 및 인증 설정
-         http.addFilterAt(loginAuthenticationFilter(), UsernamePasswordAuthenticationFilter.class);
-         http.addFilterBefore(jwtAuthenticationFilter(), UsernamePasswordAuthenticationFilter.class);
-
+        // JwtAuthenticationFilter는 기존 방식 유지 (또는 동일하게 변경해도 무방)
+        http.addFilterBefore(jwtAuthenticationFilter(), UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }

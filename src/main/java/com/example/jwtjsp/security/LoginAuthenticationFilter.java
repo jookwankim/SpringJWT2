@@ -61,22 +61,30 @@ public class LoginAuthenticationFilter extends AbstractAuthenticationProcessingF
     @Override
     protected void successfulAuthentication(HttpServletRequest request, HttpServletResponse response, FilterChain chain,
                                           Authentication authResult) throws IOException, ServletException {
-        log.info("Authentication successful for user: {}", authResult.getName());
-
-        // Access Token 생성
-        String accessToken = jwtUtil.createAccessToken(authResult);
-        // Refresh Token 생성
-        String refreshToken = jwtUtil.createRefreshToken(authResult);
-
-        // Access Token을 HttpOnly 쿠키에 저장
-        Cookie accessTokenCookie = jwtUtil.createAccessTokenCookie(accessToken);
-        response.addCookie(accessTokenCookie);
-
-        // Refresh Token을 HttpOnly 쿠키에 저장 (경로 제한)
-        Cookie refreshTokenCookie = jwtUtil.createRefreshTokenCookie(refreshToken);
-        response.addCookie(refreshTokenCookie);
-
-        log.info("Access and Refresh tokens created and added to cookies.");
+    	try {
+    		log.info("START");
+	        log.info("Authentication successful for user: {}", authResult.getName());
+	
+	        // Access Token 생성
+	        String accessToken = jwtUtil.createAccessToken(authResult);
+	        // Refresh Token 생성
+	        String refreshToken = jwtUtil.createRefreshToken(authResult);
+	
+	        // Access Token을 HttpOnly 쿠키에 저장
+	        Cookie accessTokenCookie = jwtUtil.createAccessTokenCookie(accessToken);
+	        response.addCookie(accessTokenCookie);
+	
+	        // Refresh Token을 HttpOnly 쿠키에 저장 (경로 제한)
+	        Cookie refreshTokenCookie = jwtUtil.createRefreshTokenCookie(refreshToken);
+	        response.addCookie(refreshTokenCookie);
+	
+	        log.info("Access and Refresh tokens created and added to cookies.");
+    	} catch (Exception e) {
+    		log.info("exception", e);
+    	} finally {
+    		log.info("END");
+    	}
+    	super.successfulAuthentication(request, response, chain, authResult);
 
         // 인증 성공 후 메인 페이지로 리다이렉트
         //getSuccessHandler().onAuthenticationSuccess(request, response, authResult);

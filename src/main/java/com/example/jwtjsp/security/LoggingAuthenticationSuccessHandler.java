@@ -21,6 +21,7 @@ import java.io.IOException;
 public class LoggingAuthenticationSuccessHandler extends SimpleUrlAuthenticationSuccessHandler {
 
     // SavedRequest를 사용하기 위한 RequestCache (선택 사항: Spring Security가 보호된 리소스 접근 시 저장한 요청이 있는지 확인)
+	// 사용자가 로그인 전에 접근하려 했던 요청(URL)을 저장하고 로드하는 데 사용
     private RequestCache requestCache = new HttpSessionRequestCache();
 
     /**
@@ -78,7 +79,6 @@ public class LoggingAuthenticationSuccessHandler extends SimpleUrlAuthentication
         // super.onAuthenticationSuccess(request, response, authentication); // 이 메소드는 내부적으로 clearAuthenticationAttributes 와 getRedirectStrategy().sendRedirect() 를 호출함. 둘 중 하나 사용.
 
         log.info(">>> [AuthSuccess] 리다이렉트 실행 완료 (RedirectStrategy 호출 후)");
-        // 참고: sendRedirect 이후에는 추가적인 응답 작성이 불가합니다.
     }
 
     // RequestCache 설정자 (필요한 경우 외부에서 주입 가능)
