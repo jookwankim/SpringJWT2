@@ -1,5 +1,7 @@
 package com.example.jwtjsp.config;
 
+import java.util.List;
+
 // 필요한 import 문들
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationContext;
@@ -10,7 +12,7 @@ import org.springframework.security.config.annotation.authentication.configurati
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.core.userdetails.User;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -23,7 +25,7 @@ import org.springframework.security.web.authentication.AuthenticationSuccessHand
 import org.springframework.security.web.authentication.SimpleUrlAuthenticationFailureHandler;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
-import com.example.jwtjsp.security.CustomAuthenticationEntryPoint; // EntryPoint import
+import com.example.jwtjsp.security.CustomUserDetails;
 import com.example.jwtjsp.security.JwtAuthenticationFilter;
 import com.example.jwtjsp.security.LoggingAuthenticationSuccessHandler; // 로깅 핸들러 import
 import com.example.jwtjsp.security.LoginAuthenticationFilter;
@@ -52,16 +54,26 @@ public class SecurityConfig {
 
     @Bean
     public UserDetailsService userDetailsService() {
-        UserDetails user = User.builder()
-                .username("user")
-                .password(passwordEncoder().encode("password"))
-                .roles("USER")
-                .build();
-        UserDetails admin = User.builder()
-                .username("admin")
-                .password(passwordEncoder().encode("admin"))
-                .roles("ADMIN", "USER")
-                .build();
+        UserDetails user = new CustomUserDetails(
+                "user",
+                passwordEncoder().encode("password"),
+                "user@example.com",
+                List.of(new SimpleGrantedAuthority("ROLE_USER"))
+        );
+        UserDetails admin = new CustomUserDetails(
+                "admin",
+                passwordEncoder().encode("admin"),
+                "admin@example.com",
+                List.of(new SimpleGrantedAuthority("ROLE_ADMIN"), new SimpleGrantedAuthority("ROLE_USER"))
+        );
+
+        // 만약 데이터베이스를 사용한다면, DB에서 사용자 정보를 조회할 때 email 정보도 함께 가져와서
+        // CustomUserDetails 객체를 생성하여 반환하도록 구현해야 합니다.
+        
+        // 확인용 로그 추가 (선택 사항이지만 추천)
+        log.info(">>> Creating UserDetailsService Bean. User object type: {}, Admin object type: {}",
+                 user.getClass().getName(), admin.getClass().getName());
+
         return new InMemoryUserDetailsManager(user, admin);
     }
 

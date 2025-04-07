@@ -1,9 +1,15 @@
 package com.example.jwtjsp.util;
 
-import io.jsonwebtoken.*;
-import io.jsonwebtoken.security.Keys;
-import io.jsonwebtoken.security.SecurityException;
-import lombok.extern.slf4j.Slf4j;
+import java.security.Key;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Date;
+import java.util.stream.Collectors;
+
+import javax.annotation.PostConstruct;
+import javax.servlet.http.Cookie;
+import javax.servlet.http.HttpServletRequest;
+
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
@@ -13,14 +19,19 @@ import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Component;
 
-import javax.annotation.PostConstruct;
-import javax.servlet.http.Cookie;
-import javax.servlet.http.HttpServletRequest;
-import java.security.Key;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Date;
-import java.util.stream.Collectors;
+import com.example.jwtjsp.security.CustomUserDetails;
+
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.ExpiredJwtException;
+import io.jsonwebtoken.JwtBuilder;
+import io.jsonwebtoken.JwtException;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.MalformedJwtException;
+import io.jsonwebtoken.SignatureAlgorithm;
+import io.jsonwebtoken.UnsupportedJwtException;
+import io.jsonwebtoken.security.Keys;
+import io.jsonwebtoken.security.SecurityException;
+import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 @Component
@@ -77,13 +88,43 @@ public class JwtUtil {
         String authorities = authentication.getAuthorities().stream()
                 .map(GrantedAuthority::getAuthority)
                 .collect(Collectors.joining(","));
+        
+        // --- Principal에서 Email 정보 추출 ---
+        String email = null;
+        Object principal = authentication.getPrincipal(); // Principal 객체 가져오기
+        
+        // Principal 객체가 CustomUserDetails 타입인지 확인
+        if (principal instanceof CustomUserDetails) {
+            // CustomUserDetails로 안전하게 형변환 후 email 정보 가져오기
+            email = ((CustomUserDetails) principal).getEmail();
+        } else if (principal instanceof UserDetails) {
+            // 만약 CustomUserDetails가 아닌 표준 UserDetails 타입이라면 경고 로그 출력
+            // (이 경우 email 정보를 가져올 수 없음)
+            log.warn("Principal is UserDetails but not CustomUserDetails, cannot extract email for JWT. Username: {}", ((UserDetails) principal).getUsername());
+        } else {
+            // UserDetails 타입도 아닌 경우 (예: 인증 전에는 문자열일 수 있음)
+            log.warn("Principal is not an instance of UserDetails. Type: {}", principal.getClass().getName());
+        }
+        // --- Email 정보 추출 완료 ---
 
         Date now = new Date();
         Date expiryDate = new Date(now.getTime() + accessTokenExpirationMs);
 
-        return Jwts.builder()
-                .setSubject(authentication.getName())
-                .claim(AUTHORITIES_KEY, authorities)
+     // JWT 빌더 생성
+        JwtBuilder builder = Jwts.builder()
+                .setSubject(authentication.getName()) // Username (sub 클레임)
+                .claim(AUTHORITIES_KEY, authorities); // Roles (auth 클레임)
+
+        // --- email 클레임 추가 ---
+        // email 정보가 정상적으로 추출되었을 경우에만 클레임 추가
+        if (email != null && !email.isEmpty()) {
+            builder.claim("email", email); // "email" 이라는 이름으로 클레임 추가
+            log.debug("Adding email claim to JWT for user: {}", authentication.getName());
+        }
+        // --- email 클레임 추가 완료 ---
+
+        // 토큰 생성 및 반환
+        return builder
                 .setIssuedAt(now)
                 .setExpiration(expiryDate)
                 .signWith(key, SignatureAlgorithm.HS256)
@@ -168,6 +209,49 @@ public class JwtUtil {
                 .parseClaimsJws(token)
                 .getBody();
         return claims.getSubject();
+    }
+    
+    /**
+     * Access Token 문자열에서 'email' 클레임을 추출합니다.
+     * @param token Access Token 문자열
+     * @return 추출된 email 문자열, 없거나 오류 발생 시 null 반환
+     */
+    public String getEmailFromToken(String token) {
+        if (token == null || token.isEmpty()) {
+            log.warn("getEmailFromToken called with null or empty token.");
+            return null;
+        }
+        try {
+            // 토큰 파싱하여 클레임(본문) 얻기
+            Claims claims = Jwts.parserBuilder()
+                    .setSigningKey(key) // 서명 검증용 키 설정
+                    .build()
+                    .parseClaimsJws(token) // 토큰 파싱 및 검증
+                    .getBody();
+
+            // "email" 이름의 클레임 값을 String 타입으로 반환
+            // 해당 클레임이 없으면 null 반환
+            return claims.get("email", String.class);
+
+        } catch (ExpiredJwtException e) {
+            // 토큰이 만료되었더라도 클레임 정보는 읽어올 수 있습니다.
+            log.warn("Attempting to get email from expired token: {}", e.getMessage());
+            try {
+                 // 만료된 토큰의 클레임에서 email 정보 추출 시도
+                return e.getClaims().get("email", String.class);
+            } catch (Exception claimException) {
+                 log.error("Could not get email claim from expired token's claims", claimException);
+                 return null;
+            }
+        } catch (JwtException | IllegalArgumentException e) {
+            // 기타 JWT 관련 예외 또는 잘못된 인자 예외 처리
+            log.error("Error parsing JWT to get email: {}", e.getMessage());
+            return null;
+        } catch (Exception e) {
+             // 예상치 못한 다른 예외 처리
+             log.error("Unexpected error while getting email from token", e);
+             return null;
+        }
     }
 
 

@@ -14,6 +14,7 @@
     <p>This is the main application page.</p>
 
     <a href="<c:url value='/hello'/>">Access Protected Resource (/hello)</a>
+    <a href="<c:url value='/hello2'/>">Access Protected Resource with email address (/hello2)</a>
 
     <form action="<c:url value='/logout'/>" method="post" style="display: inline;">
         <button type="submit">Logout</button>
